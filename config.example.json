@@ -1,0 +1,25 @@
+{
+  "exchanges": {
+    "coinbase": {
+      "apiKey": "YOUR_KEY",
+      "secret": "YOUR_SECRET",
+      "password": "YOUR_PASSPHRASE"
+    },
+    "kraken": {
+      "apiKey": "YOUR_KEY",
+      "secret": "YOUR_SECRET"
+    },
+    "binance": {
+      "apiKey": "YOUR_KEY",
+      "secret": "YOUR_SECRET"
+    },
+    "bybit": {
+      "apiKey": "YOUR_KEY",
+      "secret": "YOUR_SECRET"
+    },
+    "alpaca": {
+      "apiKey": "YOUR_KEY",
+      "secret": "YOUR_SECRET"
+    }
+  }
+}

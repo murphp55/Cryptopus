@@ -1,0 +1,4 @@
+ccxt
+requests
+websocket-client
+matplotlib
