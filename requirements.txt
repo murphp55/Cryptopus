@@ -2,3 +2,4 @@ ccxt
 requests
 websocket-client
 matplotlib
+customtkinter
