@@ -16,6 +16,7 @@ except ImportError:
 
 from cryptopus import APP_TITLE
 from cryptopus.config import AppConfig, validate_config
+from cryptopus.credentials import migrate_from_config_json, save_exchange_keys, is_keyring_available
 from cryptopus.data_engine import DataEngine
 from cryptopus.events import EventBus
 from cryptopus.logger import Logger
@@ -51,6 +52,7 @@ class App(_CTK_BASE):  # type: ignore[misc]
         self.data_engine = DataEngine(self.config_state, self.logger, self.keys, self.events)
         self.trader = Trader(self.config_state, self.data_engine, self.logger, self.store, self.events)
         self.runner = StrategyRunner(self.config_state, self.data_engine, self.trader, self.logger, self.events)
+        self.trader.reconcile_positions()
         self.runner.start()
         self.compare_plot: Dict = {
             "equity": {"canvas": None, "fig": None, "ax": None, "info": None},
@@ -64,16 +66,9 @@ class App(_CTK_BASE):  # type: ignore[misc]
             self.after(300, lambda: show_welcome(self))
 
     def _load_keys(self) -> Dict[str, Dict[str, str]]:
+        """Load API keys from OS keyring, migrating from config.json if needed."""
         try:
-            with open("config.json", "r", encoding="utf-8") as handle:
-                data = json.load(handle)
-            return validate_config(data, self.logger.log)
-        except FileNotFoundError:
-            self.logger.log("config.json not found; running without exchange API keys.")
-            return {}
-        except json.JSONDecodeError as exc:
-            messagebox.showerror("Config Error", f"config.json is not valid JSON:\n{exc}")
-            return {}
+            return migrate_from_config_json(log_fn=self.logger.log)
         except Exception as exc:
             messagebox.showerror("Config Error", str(exc))
             return {}
@@ -243,7 +238,23 @@ class App(_CTK_BASE):  # type: ignore[misc]
         except ValueError:
             messagebox.showerror("Invalid Input", "Poll seconds must be an integer.")
             return
-        self.config_state.live_trading = self.live_var.get()
+        # Confirm before enabling live trading
+        wants_live = self.live_var.get()
+        if wants_live and not self.config_state.live_trading:
+            confirmed = messagebox.askyesno(
+                "Enable Live Trading",
+                "WARNING: You are about to enable LIVE TRADING.\n\n"
+                "This will place REAL orders on the exchange using REAL money.\n"
+                "Losses are permanent and cannot be reversed.\n\n"
+                "Are you sure you want to enable live trading?",
+                icon="warning",
+            )
+            if not confirmed:
+                self.live_var.set(False)
+                self.logger.log("Live trading activation cancelled by user.")
+                return
+            self.logger.log("LIVE TRADING ENABLED — real orders will be placed.")
+        self.config_state.live_trading = wants_live
         self.config_state.enable_websocket = self.ws_var.get()
         try:
             self.config_state.max_daily_loss = float(self.max_loss_var.get())

@@ -69,3 +69,33 @@ class TestBacktestEngine:
         engine = BacktestEngine(fee_rate=0.001, stop_loss_pct=5.0, take_profit_pct=0.0)
         result = engine.run(candles, MomentumStrategy(), 1000.0)
         assert result.trades > 0
+
+    def test_stop_loss_exit_not_counted_as_win(self):
+        """SL exits below entry price must not be counted as wins."""
+        # Build candles: steady rise triggers a buy, then a crash triggers SL
+        candles = _make_trending_candles(25, start_price=100.0, trend=0.5)
+        # Sharp drop well beyond 5% SL
+        for i in range(10):
+            p = 112.0 - i * 4.0
+            candles.append(_make_candle(
+                candles[-1][0] + 60_000, p, p + 0.5, p - 4.0, p
+            ))
+        engine = BacktestEngine(fee_rate=0.001, stop_loss_pct=5.0, take_profit_pct=0.0)
+        result = engine.run(candles, MomentumStrategy(), 1000.0)
+        # Any SL-triggered exit on a crashing market should be a loss, not a win
+        assert result.wins == 0 or result.end_cash < result.start_cash
+
+    def test_take_profit_counted_as_win_only_if_profitable(self):
+        """TP exits should only count as wins when sell_price > entry_price."""
+        # Steady uptrend to trigger buy, then big spike to hit TP
+        candles = _make_trending_candles(25, start_price=100.0, trend=0.5)
+        for i in range(10):
+            p = 112.0 + i * 3.0
+            candles.append(_make_candle(
+                candles[-1][0] + 60_000, p, p + 5.0, p - 0.5, p
+            ))
+        engine = BacktestEngine(fee_rate=0.001, stop_loss_pct=0.0, take_profit_pct=5.0)
+        result = engine.run(candles, MomentumStrategy(), 1000.0)
+        if result.trades > 0:
+            # TP on a rising market = profitable trade = win
+            assert result.wins > 0

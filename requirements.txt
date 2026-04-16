@@ -1,5 +1,6 @@
-ccxt
-requests
-websocket-client
-matplotlib
-customtkinter
+ccxt>=4.5,<5.0
+requests>=2.31,<3.0
+websocket-client>=1.7,<2.0
+matplotlib>=3.8,<4.0
+customtkinter>=5.2,<6.0
+keyring>=23.0,<26.0

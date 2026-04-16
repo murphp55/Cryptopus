@@ -72,7 +72,7 @@ class BacktestEngine:
                     proceeds = position * sell_price
                     fee = proceeds * self.fee_rate
                     cash = proceeds - fee
-                    if sl_price > entry_price:
+                    if sell_price > entry_price:
                         wins += 1
                     position = 0
                     trades += 1
@@ -81,7 +81,8 @@ class BacktestEngine:
                     proceeds = position * sell_price
                     fee = proceeds * self.fee_rate
                     cash = proceeds - fee
-                    wins += 1
+                    if sell_price > entry_price:
+                        wins += 1
                     position = 0
                     trades += 1
 

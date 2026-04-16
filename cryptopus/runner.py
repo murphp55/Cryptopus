@@ -59,7 +59,13 @@ class StrategyRunner(threading.Thread):
             return
         signal = self.strategy.evaluate(ohlcv)
         if signal in ("buy", "sell"):
-            amount = self._calculate_position_size(ohlcv, last_price)
+            if signal == "sell":
+                pos = self.trader.positions.get(self.config.symbol)
+                if not pos or pos.amount <= 0:
+                    return
+                amount = pos.amount
+            else:
+                amount = self._calculate_position_size(ohlcv, last_price)
             self.trader.place_order(self.config.symbol, signal, amount, last_price)
             self.logger.log(f"{self.strategy.name} signal: {signal} @ {last_price:.2f} (size: {amount:.6f})")
             self._last_trade_ts = time.time()
@@ -93,7 +99,7 @@ class StrategyRunner(threading.Thread):
                 self._last_trade_ts = time.time()
 
     def _risk_blocked(self) -> bool:
-        if self.trader.realized_pnl_today <= -self.config.max_daily_loss:
+        if self.trader.get_realized_pnl_today() <= -self.config.max_daily_loss:
             self.logger.log("Max daily loss hit; strategy paused.")
             return True
         if self._last_trade_ts is not None:

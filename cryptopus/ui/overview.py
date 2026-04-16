@@ -103,7 +103,7 @@ def build_overview(frame: tk.Widget, app: App) -> None:
 
 def _poll_pnl(app: App) -> None:
     """Update the P&L display every 2 seconds."""
-    pnl = app.trader.realized_pnl_today
+    pnl = app.trader.get_realized_pnl_today()
     color = "#006600" if pnl >= 0 else "#cc0000"
     if app.ctk:
         app._pnl_label.configure(text=f"Realized P&L today: ${pnl:+.2f}", text_color=color)

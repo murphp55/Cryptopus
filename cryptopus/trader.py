@@ -1,3 +1,4 @@
+import threading
 import traceback
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -21,6 +22,7 @@ class Trader:
         self.orders: List[Order] = []
         self.realized_pnl_today: float = 0.0
         self._pnl_day: Optional[int] = None
+        self._pnl_lock = threading.Lock()
 
         if self.store:
             self.positions = self.store.load_positions()
@@ -101,11 +103,17 @@ class Trader:
                 pos.avg_price = (pos.avg_price * pos.amount + price * amount) / new_amount
             pos.amount = new_amount
         else:
+            if amount > pos.amount:
+                self.logger.log(
+                    f"WARN: sell amount {amount:.6f} exceeds position {pos.amount:.6f} "
+                    f"for {symbol}; clamping to position size."
+                )
+                amount = pos.amount
             realized = (price - pos.avg_price) * amount
             pos.realized_pnl += realized
             self._update_daily_pnl(realized)
             pos.amount -= amount
-            if pos.amount < 0:
+            if pos.amount < 1e-12:
                 pos.amount = 0
                 pos.avg_price = 0
         self.positions[symbol] = pos
@@ -114,12 +122,65 @@ class Trader:
         if self.events:
             self.events.emit("position_updated", pos)
 
+    def reconcile_positions(self) -> None:
+        """Sync local positions with actual exchange balances.
+
+        Fetches real balances from the exchange and logs any discrepancies
+        with locally tracked positions. Updates local state to match exchange.
+        Only runs when exchange is connected (live or paper with API keys).
+        """
+        if self.data_engine.exchange is None:
+            self.logger.log("Reconciliation skipped: no exchange connection.")
+            return
+        try:
+            balance = self.data_engine.exchange.fetch_balance()
+        except Exception as exc:
+            self.logger.log(f"Reconciliation failed: could not fetch balance: {exc}")
+            return
+
+        # Build a map of exchange positions (non-zero balances)
+        exchange_positions: Dict[str, float] = {}
+        free = balance.get("free", {})
+        for asset, amount in free.items():
+            if isinstance(amount, (int, float)) and amount > 1e-12:
+                exchange_positions[asset] = float(amount)
+
+        # Compare with local positions
+        discrepancies = 0
+        for symbol, pos in self.positions.items():
+            base = symbol.split("/")[0] if "/" in symbol else symbol
+            exchange_amount = exchange_positions.get(base, 0.0)
+            if abs(pos.amount - exchange_amount) > 1e-8:
+                self.logger.log(
+                    f"RECONCILE: {symbol} — local: {pos.amount:.8f}, "
+                    f"exchange: {exchange_amount:.8f} (diff: {pos.amount - exchange_amount:+.8f})"
+                )
+                pos.amount = exchange_amount
+                if pos.amount < 1e-12:
+                    pos.amount = 0
+                    pos.avg_price = 0
+                self.positions[symbol] = pos
+                if self.store:
+                    self.store.save_position(pos)
+                discrepancies += 1
+
+        if discrepancies == 0:
+            self.logger.log("Reconciliation complete: local positions match exchange.")
+        else:
+            self.logger.log(f"Reconciliation complete: corrected {discrepancies} position(s).")
+
+    def get_realized_pnl_today(self) -> float:
+        """Thread-safe read of today's realized P&L."""
+        with self._pnl_lock:
+            return self.realized_pnl_today
+
     def _update_daily_pnl(self, realized: float) -> None:
-        day = datetime.now(timezone.utc).timetuple().tm_yday
-        if self._pnl_day != day:
-            self.realized_pnl_today = 0.0
-            self._pnl_day = day
-        self.realized_pnl_today += realized
-        if self.store:
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            self.store.save_daily_pnl(today, self.realized_pnl_today)
+        with self._pnl_lock:
+            day = datetime.now(timezone.utc).timetuple().tm_yday
+            if self._pnl_day != day:
+                self.realized_pnl_today = 0.0
+                self._pnl_day = day
+            self.realized_pnl_today += realized
+            if self.store:
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                self.store.save_daily_pnl(today, self.realized_pnl_today)

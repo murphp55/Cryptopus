@@ -50,7 +50,7 @@ class TestTrader:
         trader = _make_trader()
         trader.place_order("BTC/USD", "buy", 1.0, 100.0)
         trader.place_order("BTC/USD", "sell", 1.0, 110.0)
-        assert trader.realized_pnl_today == 10.0
+        assert trader.get_realized_pnl_today() == 10.0
 
     def test_orders_list_grows(self):
         trader = _make_trader()
@@ -67,3 +67,46 @@ class TestTrader:
         trader.place_order("BTC/USD", "buy", 0.1, 50000.0)
         assert len(orders_received) == 1
         assert orders_received[0].side == "buy"
+
+    def test_oversell_clamped_to_position(self):
+        """Selling more than held should clamp to position size, not go negative."""
+        trader = _make_trader()
+        trader.place_order("BTC/USD", "buy", 0.1, 50000.0)
+        # Attempt to sell 0.5 when only holding 0.1
+        trader.place_order("BTC/USD", "sell", 0.5, 55000.0)
+        pos = trader.positions["BTC/USD"]
+        assert pos.amount == 0.0
+        # P&L should be based on clamped amount (0.1), not requested (0.5)
+        assert pos.realized_pnl == 500.0  # (55000 - 50000) * 0.1
+
+    def test_sell_exact_position_zeros_cleanly(self):
+        """Selling exactly the position amount should zero out cleanly."""
+        trader = _make_trader()
+        trader.place_order("BTC/USD", "buy", 0.001, 50000.0)
+        trader.place_order("BTC/USD", "sell", 0.001, 50000.0)
+        pos = trader.positions["BTC/USD"]
+        assert pos.amount == 0.0
+        assert pos.avg_price == 0
+
+    def test_reconcile_corrects_discrepancy(self):
+        """Reconciliation should update local position to match exchange."""
+        trader = _make_trader()
+        trader.place_order("BTC/USD", "buy", 0.1, 50000.0)
+        assert trader.positions["BTC/USD"].amount == 0.1
+
+        # Mock exchange returning a different balance
+        trader.data_engine.exchange = MagicMock()
+        trader.data_engine.exchange.fetch_balance.return_value = {
+            "free": {"BTC": 0.05, "USD": 1000.0},
+        }
+        trader.reconcile_positions()
+        assert trader.positions["BTC/USD"].amount == 0.05
+
+    def test_reconcile_skipped_without_exchange(self):
+        """Reconciliation should skip gracefully when no exchange is connected."""
+        trader = _make_trader()
+        trader.place_order("BTC/USD", "buy", 0.1, 50000.0)
+        # exchange is None by default in _make_trader
+        trader.reconcile_positions()
+        # Position should remain unchanged
+        assert trader.positions["BTC/USD"].amount == 0.1
